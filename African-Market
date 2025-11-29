@@ -1,0 +1,294 @@
+// AfricaMarket — Full‑stack E‑commerce starter (React frontend, Node/Express backend)
+// Single-file scaffold & instructions. Use this as a starting blueprint — production hardening, security, and legal compliance required before live use.
+
+/*
+README
+
+Goal: A commercial marketplace to market and sell African products and minerals.
+Monetization: Earn from views (ad/CPM placeholder) + 5% platform commission on each sale.
+
+Tech stack (recommended):
+- Frontend: React (Vite or Next.js) + Tailwind CSS
+- Backend: Node.js + Express
+- Database: PostgreSQL (or MySQL) + Prisma ORM (or Sequelize)
+- Auth: JWT + refresh tokens (or Supabase/Auth0)
+- Payments: Stripe (recommended) or PayPal (regional availability)
+- Hosting: Vercel/Netlify (frontend), Render/Heroku/AWS (backend), Supabase/RDS (DB)
+
+Security & Legal notes:
+- Selling minerals may require regulatory approvals, export permits, licensing and KYC/AML checks. Consult legal counsel and comply with local/international trade laws.
+- Implement secure file uploads for product images and documents; validate file types and sizes.
+- Implement seller onboarding & verification flow (KYC) before allowing mineral listings.
+
+What I included in this scaffold:
+1. React frontend components: Product listing, Product page, Cart, Checkout flow scaffold (calls backend).
+2. View tracking (each product view calls API to increment a view counter and logs for CPM reporting).
+3. Commission calculation: Backend will store 5% platform commission on each completed order.
+4. Basic backend endpoints (example Express handlers) for products, orders, views, payouts.
+5. Database schema (Postgres) example using Prisma-style SQL.
+6. Instructions for deploying, adding ads/CPM tracking, and extending features.
+
+-----------------------------
+FRONTEND (React + Tailwind) — single-file example component (App.jsx)
+-----------------------------
+
+import React, { useEffect, useState } from 'react'
+
+// NOTE: In a real project split components into files. This single-file example is for quick preview.
+
+export default function App() {
+  return (
+    <div className="min-h-screen bg-gray-50 text-gray-900">
+      <header className="bg-white shadow">
+        <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
+          <h1 className="text-xl font-bold">AfricaMarket</h1>
+          <nav className="space-x-4">
+            <a href="#products" className="hover:underline">Products</a>
+            <a href="#sell" className="hover:underline">Sell</a>
+            <a href="#dashboard" className="hover:underline">Dashboard</a>
+          </nav>
+        </div>
+      </header>
+
+      <main className="max-w-7xl mx-auto p-4">
+        <Hero />
+        <ProductList />
+      </main>
+
+      <footer className="mt-12 bg-white py-6 text-center text-sm text-gray-600">
+        © {new Date().getFullYear()} AfricaMarket — marketplace & platform commission 5%
+      </footer>
+    </div>
+  )
+}
+
+function Hero(){
+  return (
+    <section className="bg-gradient-to-r from-yellow-50 to-white rounded-lg p-6 mb-6">
+      <h2 className="text-2xl font-extrabold">Market African products & minerals — Global buyers, verified sellers</h2>
+      <p className="mt-2 text-sm">Earn from views and trustworthy commerce. Platform fee: 5% per sale.</p>
+    </section>
+  )
+}
+
+function ProductList(){
+  const [products, setProducts] = useState([])
+
+  useEffect(()=>{
+    // fetch public product list
+    fetch('/api/products')
+      .then(r=>r.json())
+      .then(setProducts)
+      .catch(err=>console.error(err))
+  },[])
+
+  return (
+    <section id="products">
+      <h3 className="text-lg font-bold mb-4">Featured Products</h3>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {products.length===0 && <div className="p-6 bg-white rounded shadow">Loading...</div>}
+        {products.map(p=> (
+          <ProductCard key={p.id} product={p} />
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function ProductCard({product}){
+  const handleView = ()=>{
+    // Notify backend of view for CPM/tracking & recommendation
+    fetch(`/api/products/${product.id}/view`, { method: 'POST' })
+    // Real implementation: debounce, avoid multiple counts from same session
+  }
+
+  return (
+    <article className="bg-white rounded shadow p-4" onMouseEnter={handleView}>
+      <img alt={product.title} src={product.image || '/placeholder.png'} className="w-full h-48 object-cover rounded" />
+      <h4 className="mt-2 font-semibold">{product.title}</h4>
+      <p className="text-sm text-gray-600">{product.shortDesc}</p>
+      <div className="mt-3 flex justify-between items-center">
+        <span className="font-bold">${(product.price/100).toFixed(2)}</span>
+        <a className="px-3 py-1 bg-indigo-600 text-white rounded" href={`/product/${product.id}`}>View</a>
+      </div>
+    </article>
+  )
+}
+
+/*
+Notes:
+- The frontend calls /api/products and /api/products/:id/view and /api/checkout to place orders.
+- For view-based monetization, integrate an ad provider (e.g., Google Ad Manager) or a private CPM system. The fetch to /view should be lightweight and rate-limited.
+- Add client-side rate-limit to avoid inflating views.
+*/
+
+-----------------------------
+BACKEND (Node.js + Express) — example routes (server.js)
+-----------------------------
+
+// Example Express pseudo-code. Run as a separate server (e.g., Node 18+)
+
+/*
+const express = require('express')
+const bodyParser = require('body-parser')
+const cors = require('cors')
+const { Pool } = require('pg')
+const stripe = require('stripe')(process.env.STRIPE_SECRET)
+
+const app = express()
+app.use(cors())
+app.use(bodyParser.json())
+
+const db = new Pool({ connectionString: process.env.DATABASE_URL })
+
+// Public products
+app.get('/api/products', async (req,res)=>{
+  const { rows } = await db.query('SELECT id, title, short_desc as "shortDesc", price, image FROM products WHERE published = true ORDER BY featured DESC, created_at DESC LIMIT 100')
+  res.json(rows)
+})
+
+// View tracker (increment views for CPM reporting)
+app.post('/api/products/:id/view', async (req,res)=>{
+  const id = req.params.id
+  // Basic anti-fraud: require a small delay & session token in production
+  await db.query('INSERT INTO product_views(product_id, session_id, created_at) VALUES($1,$2,NOW())', [id, req.headers['x-session-id'] || null])
+  await db.query('UPDATE products SET views = views + 1 WHERE id = $1', [id])
+  res.json({ok:true})
+})
+
+// Create checkout (simplified)
+app.post('/api/checkout', async (req,res)=>{
+  const { cart, buyer } = req.body
+  // Calculate totals and platform commission
+  const lineItems = cart.map(item => ({ price_data: { currency: 'usd', product_data: { name: item.title }, unit_amount: item.price }, quantity: item.qty }))
+  const subtotal = cart.reduce((s,i)=>s + i.price * i.qty, 0)
+  const platformCommission = Math.round(subtotal * 0.05)
+  const sellerAmount = subtotal - platformCommission
+
+  // create order in DB with status pending and commission stored
+  const orderRes = await db.query('INSERT INTO orders(buyer_info, subtotal, commission, status, created_at) VALUES($1,$2,$3,$4,NOW()) RETURNING id', [buyer, subtotal, platformCommission, 'pending'])
+  const orderId = orderRes.rows[0].id
+
+  // Create Stripe Checkout Session (for marketplace, use Stripe Connect for splitting payments or create payments to platform then payout sellers)
+  const session = await stripe.checkout.sessions.create({
+    payment_method_types: ['card'],
+    line_items: lineItems,
+    mode: 'payment',
+    success_url: process.env.FRONTEND_URL + '/success?session_id={CHECKOUT_SESSION_ID}',
+    cancel_url: process.env.FRONTEND_URL + '/cancel'
+  })
+
+  res.json({ url: session.url })
+})
+
+// Webhook to mark order as paid and execute commission logic
+app.post('/webhook', express.raw({type:'application/json'}), async (req,res)=>{
+  // handle stripe webhooks, mark orders paid, record commission and schedule payouts to sellers
+})
+
+app.listen(process.env.PORT||4000)
+*/
+
+/*
+Backend responsibilities & commission flow details:
+- When an order is paid, record order_lines and compute commission = 5% of product price per line.
+- Use Stripe Connect to route funds: either collect total to platform, subtract commission, and transfer remainder to seller account (recommended), OR receive payment to platform and schedule payouts to sellers after verification.
+- Store payout history, fees, and tax documents.
+*/
+
+-----------------------------
+DATABASE SCHEMA (Postgres example)
+-----------------------------
+
+-- products table
+CREATE TABLE products (
+  id SERIAL PRIMARY KEY,
+  seller_id INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  short_desc TEXT,
+  description TEXT,
+  price INTEGER NOT NULL, -- in cents
+  currency VARCHAR(3) DEFAULT 'USD',
+  image TEXT,
+  stock INTEGER DEFAULT 0,
+  views BIGINT DEFAULT 0,
+  published BOOLEAN DEFAULT false,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- product_views (for CPM & analytics)
+CREATE TABLE product_views (
+  id SERIAL PRIMARY KEY,
+  product_id INTEGER REFERENCES products(id) ON DELETE CASCADE,
+  session_id TEXT,
+  ip TEXT,
+  user_agent TEXT,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- sellers / users
+CREATE TABLE users (
+  id SERIAL PRIMARY KEY,
+  email TEXT UNIQUE NOT NULL,
+  name TEXT,
+  password_hash TEXT,
+  is_seller BOOLEAN DEFAULT false,
+  verified BOOLEAN DEFAULT false,
+  stripe_account_id TEXT, -- for payouts using Stripe Connect
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- orders
+CREATE TABLE orders (
+  id SERIAL PRIMARY KEY,
+  buyer_id INTEGER REFERENCES users(id),
+  buyer_info JSONB,
+  subtotal INTEGER,
+  commission INTEGER,
+  status VARCHAR(20), -- pending, paid, shipped, completed, refunded
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- order_items
+CREATE TABLE order_items (
+  id SERIAL PRIMARY KEY,
+  order_id INTEGER REFERENCES orders(id) ON DELETE CASCADE,
+  product_id INTEGER REFERENCES products(id),
+  seller_id INTEGER,
+  price INTEGER,
+  qty INTEGER,
+  commission_amount INTEGER
+);
+
+-----------------------------
+VIEW-BASED MONETIZATION (high-level)
+-----------------------------
+1. Place ad slots on product pages (use Google Ad Manager / AdSense / other regional ad networks) to earn CPM.
+2. Track product_views and compute impressions (e.g., 1000 views = 1 CPM unit), then report earnings per product/seller.
+3. Optionally sell promoted placements or featured listings (flat fee or CPC).
+4. To prevent fraud, deduplicate views by session_id/ip/time window and apply heuristics.
+
+API example: GET /api/analytics/views?product_id=123 -> returns aggregated counts and estimated CPM revenue (using configured CPM rates).
+
+-----------------------------
+SELLER ONBOARDING & KYC
+-----------------------------
+- Require sellers of minerals to submit documents (business registration, export licenses, KYC ID) and mark them verified before enabling listings.
+- Store documents securely (private S3 bucket) and flag listings as restricted until verification passes.
+
+-----------------------------
+DEPLOYMENT & NEXT STEPS
+-----------------------------
+1. Initialize repo: `npm init` + install dependencies (react, express, prisma, stripe, tailwindcss)
+2. Implement auth, file uploads (S3), payment integration (Stripe Connect) and admin dashboards.
+3. Add monitoring, logging, rate-limiting, and security review.
+4. Get legal counsel for minerals export/sales, and privacy policy / terms & conditions.
+
+-----------------------------
+If you want, I can:
+- Generate a full repo scaffold (multiple files) you can download as a zip.
+- Build the frontend pages and backend endpoints into separate files and provide DB seed scripts.
+- Create an admin dashboard for payout management and seller verification.
+
+Tell me which of these you want next and I will prepare the full code files for download.
+*/
